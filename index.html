@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compta rapide — Saisie ventes / achats</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="app-header">
+    <h1>Compta rapide</h1>
+    <div class="month-picker">
+      <label for="monthInput">Mois actif</label>
+      <input type="month" id="monthInput">
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-type="ventes">Ventes</button>
+    <button class="tab-btn" data-type="achats">Achats</button>
+    <div class="tabs-total" id="tabsTotal"></div>
+  </nav>
+
+  <main class="entries-panel">
+    <div class="entries-table-wrapper" id="tableWrapper">
+      <table class="entries-table">
+        <thead>
+          <tr><th class="col-day">Jour</th><th class="col-amount">Montant</th><th class="col-actions"></th></tr>
+        </thead>
+        <tbody id="entriesBody"></tbody>
+      </table>
+      <p class="empty-state" id="emptyState">Aucune saisie pour ce mois.</p>
+    </div>
+
+    <form class="entry-form" id="entryForm" autocomplete="off">
+      <div class="field">
+        <label for="dayInput">Jour</label>
+        <input type="number" id="dayInputField" min="1" max="31" placeholder="JJ">
+      </div>
+      <div class="field field-amount">
+        <label for="amountInputField">Montant</label>
+        <input type="text" inputmode="decimal" id="amountInputField" placeholder="0,00">
+      </div>
+      <div class="field field-multiplier">
+        <label class="checkbox-label">
+          <input type="checkbox" id="multiplierEnabled" checked>
+          Multiplicateur
+        </label>
+        <input type="number" id="multiplierValue" value="1000" step="any" min="0">
+      </div>
+      <button type="submit" class="btn-add">Ajouter (Entrée)</button>
+      <span class="form-error" id="formError"></span>
+    </form>
+  </main>
+
+  <footer class="toolbar">
+    <div class="toolbar-group">
+      <span class="toolbar-label">CSV</span>
+      <button id="btnCopyCsv" class="icon-btn" title="Copier CSV" aria-label="Copier CSV">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+      </button>
+      <button id="btnDownloadCsv" class="icon-btn" title="Télécharger CSV" aria-label="Télécharger CSV">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      </button>
+      <label class="file-btn icon-btn" title="Importer CSV" aria-label="Importer CSV">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        <input type="file" id="fileImportCsv" accept=".csv,text/csv" hidden>
+      </label>
+    </div>
+    <div class="toolbar-group">
+      <button id="btnCopyExcel" class="btn-excel" title="Colle Date et Montant aux colonnes configurées">Copier Excel</button>
+      <button id="btnExcelSettings" title="Paramétrer les colonnes Excel">⚙ Colonnes</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="btnExportJournal" class="icon-btn" title="Journal technique — export à des fins d'audit" aria-label="Exporter le journal technique">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="8" height="10" rx="4"></rect><path d="M12 8V5"></path><path d="M10 5 8.5 3.5"></path><path d="M14 5l1.5-1.5"></path><path d="M8 11H4"></path><path d="M8 14H3"></path><path d="M8 17l-3.5 2.5"></path><path d="M16 11h4"></path><path d="M16 14h5"></path><path d="M16 17l3.5 2.5"></path></svg>
+      </button>
+    </div>
+  </footer>
+
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <h2 id="modalTitle">Doublons détectés</h2>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="modalExportExisting">Exporter l'existant</button>
+      <button id="modalCancel">Annuler</button>
+      <button id="modalConfirm" class="btn-danger">Confirmer quand même</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="settingsModalBackdrop">
+  <div class="modal">
+    <h2>Colonnes Excel</h2>
+    <div class="modal-body">
+      <p>Lettres de colonnes Excel utilisées lors du collage (ex : A, R, AA…).</p>
+      <div class="settings-field">
+        <label for="mapDateColumn">Colonne Date</label>
+        <input type="text" id="mapDateColumn" maxlength="3">
+      </div>
+      <div class="settings-field">
+        <label for="mapAmountColumn">Colonne Montant</label>
+        <input type="text" id="mapAmountColumn" maxlength="3">
+      </div>
+
+      <div class="settings-divider"></div>
+      <p class="settings-subtitle">Colonnes supplémentaires à valeur constante</p>
+      <div id="constantColumnsList"></div>
+      <button type="button" id="btnAddConstantColumn" class="btn-add-constant">+ Ajouter une colonne</button>
+
+      <p class="settings-error" id="settingsError"></p>
+    </div>
+    <div class="modal-actions">
+      <button id="settingsCancel">Annuler</button>
+      <button id="settingsSave" class="btn-primary">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
