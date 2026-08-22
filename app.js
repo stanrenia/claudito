@@ -123,6 +123,14 @@
     return String(day).padStart(2, "0") + "/" + parts[1] + "/" + parts[0];
   }
 
+  // Dash-separated on purpose: Excel/LibreOffice Calc remember the delimiters
+  // from the last "Text to Columns" / unformatted-text-paste import and silently
+  // re-split pasted values containing "/" into extra cells on subsequent pastes.
+  function formatDateForSpreadsheetPaste(monthKey, day) {
+    var parts = monthKey.split("-");
+    return String(day).padStart(2, "0") + "-" + parts[1] + "-" + parts[0];
+  }
+
   function colLetterToIndex(letters) {
     var clean = String(letters || "").trim().toUpperCase();
     var index = 0;
@@ -403,7 +411,7 @@
 
     var lines = list.map(function (e) {
       var row = new Array(width).fill("");
-      row[dateIdx] = formatDateFR(state.currentMonth, e.day);
+      row[dateIdx] = formatDateForSpreadsheetPaste(state.currentMonth, e.day);
       row[amountIdx] = String(e.amount).replace(".", ",");
       constants.forEach(function (c) { row[c.idx] = c.value; });
       return row.join("\t");
