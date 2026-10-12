@@ -126,7 +126,39 @@ html, body {
 
 .col-day { width: 70px; }
 .col-amount { text-align: right; }
-.col-actions { width: 36px; }
+.col-actions { width: 64px; white-space: nowrap; text-align: right; }
+.col-label { text-align: left; }
+.col-payment { width: 56px; text-align: center; }
+
+.entries-table th.col-payment { text-align: center; }
+
+.payment-badge {
+  display: inline-block;
+  min-width: 34px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  background: #eef0f3;
+  color: var(--color-text-muted);
+}
+
+.payment-badge.payment-esp { background: #fff4e0; color: #9a6200; }
+.payment-badge.payment-ov { background: #eaf0fe; color: var(--color-primary-dark); }
+
+.row-editing select {
+  padding: 4px 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.entries-table td.col-label {
+  padding-left: 16px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
 
 .entries-table td.col-amount {
   text-align: right;
@@ -150,6 +182,56 @@ html, body {
   color: var(--color-danger);
   background: #fdeceb;
 }
+
+.btn-edit,
+.btn-edit-save,
+.btn-edit-cancel {
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.btn-edit svg,
+.btn-edit-save svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.btn-edit:hover,
+.btn-edit-save:hover {
+  color: var(--color-primary);
+  background: #eaf0fe;
+}
+
+.btn-edit-cancel:hover {
+  color: var(--color-danger);
+  background: #fdeceb;
+}
+
+.row-editing td { background: #fafbfc; }
+
+.row-editing input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.row-editing input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.row-editing .edit-amount { text-align: right; }
+
+.btn-delete { vertical-align: middle; }
 
 .empty-state {
   text-align: center;
@@ -196,6 +278,49 @@ html, body {
 #dayInputField { width: 70px; }
 .field-amount input { width: 100px; }
 
+.field .field-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.segmented label {
+  position: relative;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented span {
+  display: block;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.segmented label + label span { border-left: 1px solid var(--color-border); }
+
+.segmented input:checked + span {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.segmented input:focus-visible + span {
+  box-shadow: inset 0 0 0 2px var(--color-primary-dark);
+}
+
 .field-multiplier {
   flex-direction: row;
   align-items: center;
@@ -237,6 +362,33 @@ html, body {
 
 .btn-add:hover { background: var(--color-primary-dark); }
 
+.entry-form { flex-wrap: wrap; }
+
+.btn-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-note svg { width: 14px; height: 14px; }
+
+.btn-note:hover,
+.btn-note[aria-expanded="true"] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.field-note { flex: 1 0 100%; }
+.field-note[hidden] { display: none; }
+.field-note input { width: 100%; }
+
 .form-error {
   position: absolute;
   bottom: -18px;
@@ -275,6 +427,16 @@ html, body {
 .toolbar button:hover, .file-btn:hover {
   border-color: var(--color-primary);
   color: var(--color-primary);
+}
+
+.toolbar .excel-payment-filter {
+  padding: 6px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--color-text);
+  cursor: pointer;
 }
 
 .toolbar-label {
@@ -402,6 +564,25 @@ html, body {
   border-radius: 6px;
   text-transform: uppercase;
   text-align: center;
+}
+
+.settings-field input.month-field {
+  width: auto;
+  text-transform: none;
+}
+
+.transfer-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.transfer-mode label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 .settings-error {

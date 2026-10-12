@@ -9,6 +9,10 @@
   var state = loadData();
   var auditLog = loadLog();
   var pendingImport = null; // holds {rows, duplicates} while duplicate modal is open
+  var editingId = null; // id of the row currently being edited inline
+
+  var ICON_PENCIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
+  var ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
   // ---------- Persistence ----------
 
@@ -19,8 +23,10 @@
       currentMonth: monthKey,
       currentType: "ventes",
       months: {},
-      excelMapping: { date: "A", amount: "R", constants: [] },
-      multiplier: { enabled: true, value: 1000 }
+      excelMapping: { date: "A", amount: "R", label: "B", constants: [] },
+      multiplier: { enabled: true, value: 1000 },
+      paymentMode: "ESP",
+      excelPaymentFilter: "ALL"
     };
   }
 
@@ -33,7 +39,7 @@
       if (!parsed.currentMonth) parsed.currentMonth = defaultData().currentMonth;
       if (!parsed.currentType) parsed.currentType = "ventes";
       if (!parsed.excelMapping || !parsed.excelMapping.date || !parsed.excelMapping.amount) {
-        parsed.excelMapping = { date: "A", amount: "R", constants: [] };
+        parsed.excelMapping = { date: "A", amount: "R", label: "B", constants: [] };
       }
       if (!Array.isArray(parsed.excelMapping.constants)) {
         parsed.excelMapping.constants = [];
@@ -42,8 +48,25 @@
           return c && typeof c.column === "string" && /^[A-Za-z]{1,3}$/.test(c.column);
         });
       }
+      // Libellé: "" means explicitly disabled; missing/invalid falls back to the default "B"
+      // unless that column is already taken by a saved mapping.
+      var lbl = parsed.excelMapping.label;
+      if (lbl !== "" && !(typeof lbl === "string" && /^[A-Za-z]{1,3}$/.test(lbl))) {
+        lbl = "B";
+      }
+      lbl = lbl.toUpperCase();
+      var lblTaken = lbl !== "" && (
+        lbl === String(parsed.excelMapping.date).toUpperCase() ||
+        lbl === String(parsed.excelMapping.amount).toUpperCase() ||
+        parsed.excelMapping.constants.some(function (c) { return c.column.toUpperCase() === lbl; })
+      );
+      parsed.excelMapping.label = lblTaken ? "" : lbl;
       if (!parsed.multiplier || typeof parsed.multiplier.value !== "number" || isNaN(parsed.multiplier.value) || parsed.multiplier.value <= 0) {
         parsed.multiplier = { enabled: true, value: 1000 };
+      }
+      if (!isPaymentMode(parsed.paymentMode)) parsed.paymentMode = "ESP";
+      if (parsed.excelPaymentFilter !== "ALL" && !isPaymentMode(parsed.excelPaymentFilter)) {
+        parsed.excelPaymentFilter = "ALL";
       }
       return parsed;
     } catch (e) {
@@ -81,6 +104,18 @@
   }
 
   // ---------- Helpers ----------
+
+  var PAYMENT_MODES = ["ESP", "OV"]; // espèces, ordre de virement
+
+  function isPaymentMode(value) {
+    return PAYMENT_MODES.indexOf(value) !== -1;
+  }
+
+  // Entries saved before the payment mode existed have no `payment` field.
+  function paymentBadge(payment) {
+    if (!isPaymentMode(payment)) return '<span class="payment-badge">—</span>';
+    return '<span class="payment-badge payment-' + payment.toLowerCase() + '">' + payment + '</span>';
+  }
 
   function toMonthKey(year, month) {
     return year + "-" + String(month).padStart(2, "0");
@@ -129,6 +164,12 @@
   function formatDateForSpreadsheetPaste(monthKey, day) {
     var parts = monthKey.split("-");
     return String(day).padStart(2, "0") + "-" + parts[1] + "-" + parts[0];
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 
   function colLetterToIndex(letters) {
@@ -187,6 +228,11 @@
     els.entryForm = document.getElementById("entryForm");
     els.dayInput = document.getElementById("dayInputField");
     els.amountInput = document.getElementById("amountInputField");
+    els.paymentRadios = Array.prototype.slice.call(document.querySelectorAll('input[name="paymentMode"]'));
+    els.excelPaymentFilter = document.getElementById("excelPaymentFilter");
+    els.btnNote = document.getElementById("btnNote");
+    els.noteField = document.getElementById("noteField");
+    els.noteInput = document.getElementById("noteInputField");
     els.formError = document.getElementById("formError");
     els.multiplierEnabled = document.getElementById("multiplierEnabled");
     els.multiplierValue = document.getElementById("multiplierValue");
@@ -204,7 +250,15 @@
     els.modalConfirm = document.getElementById("modalConfirm");
     els.settingsModalBackdrop = document.getElementById("settingsModalBackdrop");
     els.mapDateColumn = document.getElementById("mapDateColumn");
+    els.btnTransferMonth = document.getElementById("btnTransferMonth");
+    els.transferModalBackdrop = document.getElementById("transferModalBackdrop");
+    els.transferSummary = document.getElementById("transferSummary");
+    els.transferTargetMonth = document.getElementById("transferTargetMonth");
+    els.transferError = document.getElementById("transferError");
+    els.transferCancel = document.getElementById("transferCancel");
+    els.transferConfirm = document.getElementById("transferConfirm");
     els.mapAmountColumn = document.getElementById("mapAmountColumn");
+    els.mapLabelColumn = document.getElementById("mapLabelColumn");
     els.settingsError = document.getElementById("settingsError");
     els.settingsCancel = document.getElementById("settingsCancel");
     els.settingsSave = document.getElementById("settingsSave");
@@ -227,12 +281,41 @@
     list.forEach(function (entry) {
       var tr = document.createElement("tr");
       tr.className = "row-" + state.currentType;
-      tr.innerHTML =
-        '<td class="col-day">' + entry.day + '</td>' +
-        '<td class="col-amount">' + formatAmount(entry.amount) + '</td>' +
-        '<td class="col-actions"><button class="btn-delete" title="Supprimer" data-id="' + entry.id + '">✕</button></td>';
+      if (entry.id === editingId) {
+        tr.classList.add("row-editing");
+        tr.dataset.id = entry.id;
+        tr.innerHTML =
+          '<td class="col-day"><input type="number" class="edit-day" min="1" max="' + daysInMonth(state.currentMonth) + '" value="' + entry.day + '"></td>' +
+          '<td class="col-amount"><input type="text" inputmode="decimal" class="edit-amount" value="' + escapeHtml(String(entry.amount).replace(".", ",")) + '"></td>' +
+          '<td class="col-payment"><select class="edit-payment">' +
+            (isPaymentMode(entry.payment) ? "" : '<option value="" selected>—</option>') +
+            PAYMENT_MODES.map(function (m) {
+              return '<option value="' + m + '"' + (entry.payment === m ? " selected" : "") + ">" + m + "</option>";
+            }).join("") +
+          '</select></td>' +
+          '<td class="col-label"><input type="text" class="edit-label" maxlength="120" placeholder="Libellé" value="' + escapeHtml(entry.label || "") + '"></td>' +
+          '<td class="col-actions">' +
+            '<button class="btn-edit-save" title="Enregistrer (Entrée)" aria-label="Enregistrer" data-id="' + entry.id + '">' + ICON_CHECK + '</button>' +
+            '<button class="btn-edit-cancel" title="Annuler (Échap)" aria-label="Annuler">✕</button>' +
+          '</td>';
+      } else {
+        tr.innerHTML =
+          '<td class="col-day">' + entry.day + '</td>' +
+          '<td class="col-amount">' + formatAmount(entry.amount) + '</td>' +
+          '<td class="col-payment">' + paymentBadge(entry.payment) + '</td>' +
+          '<td class="col-label">' + escapeHtml(entry.label || "") + '</td>' +
+          '<td class="col-actions">' +
+            '<button class="btn-edit" title="Modifier" aria-label="Modifier" data-id="' + entry.id + '">' + ICON_PENCIL + '</button>' +
+            '<button class="btn-delete" title="Supprimer" aria-label="Supprimer" data-id="' + entry.id + '">✕</button>' +
+          '</td>';
+      }
       els.entriesBody.appendChild(tr);
     });
+
+    if (editingId) {
+      var firstInput = els.entriesBody.querySelector(".row-editing .edit-amount");
+      if (firstInput) { firstInput.focus(); firstInput.select(); }
+    }
 
     els.emptyState.style.display = list.length ? "none" : "block";
 
@@ -251,6 +334,8 @@
       id: genId(),
       day: day,
       amount: amount,
+      label: (meta && meta.label) || "",
+      payment: meta && meta.payment,
       createdAt: new Date().toISOString()
     };
     getCurrentList().push(entry);
@@ -259,8 +344,10 @@
       month: state.currentMonth,
       type: state.currentType,
       day: day,
-      amount: amount
+      amount: amount,
+      payment: entry.payment
     };
+    if (entry.label) details.label = entry.label;
     if (meta && meta.multiplierApplied) {
       details.rawInput = meta.rawInput;
       details.multiplier = meta.multiplier;
@@ -280,10 +367,63 @@
       month: state.currentMonth,
       type: state.currentType,
       day: removed.day,
-      amount: removed.amount
+      amount: removed.amount,
+      payment: removed.payment || "",
+      label: removed.label || ""
     });
     render();
     showToast("Ligne supprimée.");
+  }
+
+  function startEdit(id) {
+    editingId = id;
+    render();
+  }
+
+  function cancelEdit() {
+    editingId = null;
+    render();
+    els.dayInput.focus();
+  }
+
+  function saveEdit() {
+    var tr = els.entriesBody.querySelector(".row-editing");
+    if (!tr) return;
+    var entry = getCurrentList().find(function (e) { return e.id === editingId; });
+    if (!entry) { cancelEdit(); return; }
+
+    var day = parseInt(tr.querySelector(".edit-day").value, 10);
+    var maxDay = daysInMonth(state.currentMonth);
+    if (isNaN(day) || day < 1 || day > maxDay) {
+      showToast("Jour invalide (1-" + maxDay + ").", true);
+      tr.querySelector(".edit-day").focus();
+      return;
+    }
+    var amount = parseAmount(tr.querySelector(".edit-amount").value);
+    if (isNaN(amount) || amount <= 0) {
+      showToast("Montant invalide.", true);
+      tr.querySelector(".edit-amount").focus();
+      return;
+    }
+    var label = tr.querySelector(".edit-label").value.replace(/\s+/g, " ").trim();
+    var payment = tr.querySelector(".edit-payment").value;
+
+    var from = { day: entry.day, amount: entry.amount, payment: entry.payment || "", label: entry.label || "" };
+    entry.day = day;
+    entry.amount = amount;
+    if (isPaymentMode(payment)) entry.payment = payment;
+    entry.label = label;
+    editingId = null;
+    saveData();
+    audit("entry_edited", {
+      month: state.currentMonth,
+      type: state.currentType,
+      from: from,
+      to: { day: day, amount: amount, payment: entry.payment || "", label: label }
+    });
+    render();
+    showToast("Ligne modifiée.");
+    els.dayInput.focus();
   }
 
   // ---------- Form logic ----------
@@ -330,6 +470,26 @@
     }
   }
 
+  function setNoteOpen(open) {
+    els.noteField.hidden = !open;
+    els.btnNote.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      els.noteInput.focus();
+    } else {
+      els.noteInput.value = "";
+    }
+  }
+
+  function handleNoteKeydown(e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitForm();
+    } else if (e.key === "Escape") {
+      setNoteOpen(false);
+      els.dayInput.focus();
+    }
+  }
+
   function submitForm() {
     var day = parseInt(els.dayInput.value, 10);
     var maxDay = daysInMonth(state.currentMonth);
@@ -354,9 +514,12 @@
     addEntry(day, amount, {
       multiplierApplied: multiplierApplied,
       rawInput: rawAmount,
-      multiplier: state.multiplier.value
+      multiplier: state.multiplier.value,
+      payment: state.paymentMode,
+      label: els.noteInput.value.replace(/\s+/g, " ").trim()
     });
     els.amountInput.value = "";
+    els.noteInput.value = "";
     els.dayInput.focus();
     els.dayInput.select();
   }
@@ -368,9 +531,9 @@
       if (a.day !== b.day) return a.day - b.day;
       return a.createdAt.localeCompare(b.createdAt);
     });
-    var lines = ["Date;Montant"];
+    var lines = ["Date;Montant;Libellé;Mode"];
     list.forEach(function (e) {
-      lines.push(formatDateFR(state.currentMonth, e.day) + ";" + String(e.amount).replace(".", ","));
+      lines.push(formatDateFR(state.currentMonth, e.day) + ";" + String(e.amount).replace(".", ",") + ";" + csvEscape(e.label || "") + ";" + (e.payment || ""));
     });
     return lines.join("\r\n");
   }
@@ -395,16 +558,30 @@
 
   // ---------- Excel clipboard (column-mapped paste) ----------
 
+  // Entries of the current list matching the payment filter chosen next to "Copier Excel".
+  function getExcelList() {
+    var filter = state.excelPaymentFilter;
+    var list = getCurrentList();
+    if (filter === "ALL") return list;
+    return list.filter(function (e) { return e.payment === filter; });
+  }
+
+  // Plain text only, on purpose: an HTML clipboard flavor would let Excel apply
+  // the source formatting and wipe the destination's borders/fonts. The date
+  // display (JJ/MM/AAAA vs serial like 46223) therefore comes from the number
+  // format of the destination column.
   function buildExcelClipboardText() {
     var dateIdx = colLetterToIndex(state.excelMapping.date);
     var amountIdx = colLetterToIndex(state.excelMapping.amount);
     var constants = (state.excelMapping.constants || []).map(function (c) {
       return { idx: colLetterToIndex(c.column), value: c.value };
     });
+    var labelIdx = colLetterToIndex(state.excelMapping.label);
     var allIdx = [dateIdx, amountIdx].concat(constants.map(function (c) { return c.idx; }));
+    if (labelIdx >= 0) allIdx.push(labelIdx);
     var width = Math.max.apply(null, allIdx) + 1;
 
-    var list = getCurrentList().slice().sort(function (a, b) {
+    var list = getExcelList().slice().sort(function (a, b) {
       if (a.day !== b.day) return a.day - b.day;
       return a.createdAt.localeCompare(b.createdAt);
     });
@@ -414,6 +591,7 @@
       row[dateIdx] = formatDateForSpreadsheetPaste(state.currentMonth, e.day);
       row[amountIdx] = String(e.amount).replace(".", ",");
       constants.forEach(function (c) { row[c.idx] = c.value; });
+      if (labelIdx >= 0) row[labelIdx] = (e.label || "").replace(/[\t\r\n]+/g, " ");
       return row.join("\t");
     });
 
@@ -421,20 +599,24 @@
   }
 
   function exportExcelClipboard() {
-    var list = getCurrentList();
+    var list = getExcelList();
     if (list.length === 0) {
-      showToast("Aucune ligne à copier.", true);
+      showToast(state.excelPaymentFilter === "ALL"
+        ? "Aucune ligne à copier."
+        : "Aucune ligne en " + state.excelPaymentFilter + " à copier.", true);
       return;
     }
-    var text = buildExcelClipboardText();
-    navigator.clipboard.writeText(text).then(function () {
+    navigator.clipboard.writeText(buildExcelClipboardText()).then(function () {
       audit("excel_copied", {
         month: state.currentMonth,
         type: state.currentType,
         count: list.length,
+        paymentFilter: state.excelPaymentFilter,
         mapping: state.excelMapping
       });
-      showToast("Collé pour Excel : Date en colonne " + state.excelMapping.date + ", Montant en colonne " + state.excelMapping.amount + ".");
+      showToast(list.length + " ligne(s)" +
+        (state.excelPaymentFilter === "ALL" ? "" : " " + state.excelPaymentFilter) +
+        " copiée(s) pour Excel : Date en colonne " + state.excelMapping.date + ", Montant en colonne " + state.excelMapping.amount + ".");
     }, function () {
       showToast("Impossible de copier dans le presse-papier.", true);
     });
@@ -462,10 +644,20 @@
         errors.push({ line: idx + 1, raw: line });
         return;
       }
+      // Trailing "Mode" column (ESP/OV) is optional, for CSVs exported before it existed.
+      var rest = cells.slice(2);
+      var payment;
+      if (rest.length > 1 && isPaymentMode(rest[rest.length - 1].toUpperCase())) {
+        payment = rest.pop().toUpperCase();
+      } else if (rest.length > 1 && rest[rest.length - 1] === "") {
+        rest.pop();
+      }
       rows.push({
         monthKey: toMonthKey(parsedDate.year, parsedDate.month),
         day: parsedDate.day,
-        amount: amount
+        amount: amount,
+        payment: payment,
+        label: rest.join(delimiter).replace(/""/g, '"').trim()
       });
     });
 
@@ -507,6 +699,8 @@
         id: genId(),
         day: row.day,
         amount: row.amount,
+        label: row.label || "",
+        payment: row.payment,
         createdAt: new Date().toISOString()
       });
       monthsTouched[row.monthKey] = true;
@@ -613,6 +807,7 @@
   function openSettingsModal() {
     els.mapDateColumn.value = state.excelMapping.date;
     els.mapAmountColumn.value = state.excelMapping.amount;
+    els.mapLabelColumn.value = state.excelMapping.label || "";
     renderConstantColumnRows(state.excelMapping.constants || []);
     els.settingsError.textContent = "";
     els.settingsModalBackdrop.classList.add("open");
@@ -637,9 +832,20 @@
       return;
     }
 
+    var labelCol = els.mapLabelColumn.value.trim().toUpperCase();
+    if (labelCol !== "" && !validPattern.test(labelCol)) {
+      els.settingsError.textContent = "Colonne Libellé invalide : \"" + labelCol + "\".";
+      return;
+    }
+    if (labelCol !== "" && (labelCol === dateCol || labelCol === amountCol)) {
+      els.settingsError.textContent = "La colonne Libellé doit être différente des colonnes Date et Montant.";
+      return;
+    }
+
     var usedCols = {};
     usedCols[dateCol] = true;
     usedCols[amountCol] = true;
+    if (labelCol !== "") usedCols[labelCol] = true;
 
     var constants = [];
     var rows = Array.prototype.slice.call(els.constantColumnsList.querySelectorAll(".constant-column-row"));
@@ -663,12 +869,84 @@
 
     els.settingsError.textContent = "";
     var previous = state.excelMapping;
-    state.excelMapping = { date: dateCol, amount: amountCol, constants: constants };
+    state.excelMapping = { date: dateCol, amount: amountCol, label: labelCol, constants: constants };
     saveData();
     audit("excel_mapping_updated", { from: previous, to: state.excelMapping });
     closeSettingsModal();
     showToast("Mapping mis à jour : Date → " + dateCol + ", Montant → " + amountCol +
       (constants.length ? ", + " + constants.length + " colonne(s) constante(s)" : "") + ".");
+  }
+
+  // ---------- Month transfer ----------
+
+  function nextMonthKey(monthKey) {
+    var parts = monthKey.split("-").map(Number);
+    return parts[1] === 12 ? toMonthKey(parts[0] + 1, 1) : toMonthKey(parts[0], parts[1] + 1);
+  }
+
+  function openTransferModal() {
+    var bucket = getMonthBucket(state.currentMonth);
+    var count = bucket.ventes.length + bucket.achats.length;
+    if (count === 0) {
+      showToast("Aucune saisie à transférer pour ce mois.", true);
+      return;
+    }
+    els.transferSummary.innerHTML = "Transférer les <strong>" + count + "</strong> saisie(s) de <strong>" +
+      state.currentMonth + "</strong> (Ventes : " + bucket.ventes.length + ", Achats : " + bucket.achats.length + ") vers :";
+    els.transferTargetMonth.value = nextMonthKey(state.currentMonth);
+    els.transferError.textContent = "";
+    els.transferModalBackdrop.classList.add("open");
+    els.transferTargetMonth.focus();
+  }
+
+  function closeTransferModal() {
+    els.transferModalBackdrop.classList.remove("open");
+  }
+
+  function confirmTransfer() {
+    var source = state.currentMonth;
+    var target = els.transferTargetMonth.value;
+    if (!/^\d{4}-\d{2}$/.test(target)) {
+      els.transferError.textContent = "Choisissez un mois de destination.";
+      return;
+    }
+    if (target === source) {
+      els.transferError.textContent = "Le mois de destination doit être différent du mois source.";
+      return;
+    }
+    var mode = document.querySelector('input[name="transferMode"]:checked').value;
+    var maxDay = daysInMonth(target);
+    var sourceBucket = getMonthBucket(source);
+    var targetBucket = getMonthBucket(target);
+    var count = 0;
+    var clamped = 0;
+
+    ["ventes", "achats"].forEach(function (type) {
+      sourceBucket[type].forEach(function (entry) {
+        var day = entry.day;
+        if (day > maxDay) { day = maxDay; clamped++; }
+        var moved = {
+          id: mode === "move" ? entry.id : genId(),
+          day: day,
+          amount: entry.amount,
+          label: entry.label || "",
+          payment: entry.payment,
+          createdAt: entry.createdAt
+        };
+        targetBucket[type].push(moved);
+        count++;
+      });
+      if (mode === "move") sourceBucket[type] = [];
+    });
+
+    state.currentMonth = target;
+    editingId = null;
+    saveData();
+    audit("month_transferred", { from: source, to: target, mode: mode, count: count, daysClamped: clamped });
+    closeTransferModal();
+    render();
+    showToast(count + " saisie(s) " + (mode === "move" ? "déplacée(s)" : "copiée(s)") + " vers " + target +
+      (clamped ? " (" + clamped + " jour(s) ramené(s) au dernier jour du mois)" : "") + ".");
   }
 
   // ---------- Journal export ----------
@@ -707,17 +985,43 @@
     });
 
     els.entriesBody.addEventListener("click", function (e) {
-      var btn = e.target.closest(".btn-delete");
+      var btn = e.target.closest("button");
       if (!btn) return;
-      deleteEntry(btn.dataset.id);
+      if (btn.classList.contains("btn-delete")) deleteEntry(btn.dataset.id);
+      else if (btn.classList.contains("btn-edit")) startEdit(btn.dataset.id);
+      else if (btn.classList.contains("btn-edit-save")) saveEdit();
+      else if (btn.classList.contains("btn-edit-cancel")) cancelEdit();
+    });
+
+    els.entriesBody.addEventListener("keydown", function (e) {
+      if (!e.target.closest(".row-editing")) return;
+      if (e.key === "Enter") { e.preventDefault(); saveEdit(); }
+      else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
     });
 
     els.dayInput.addEventListener("keydown", handleDayKeydown);
     els.amountInput.addEventListener("keydown", handleAmountKeydown);
+    els.noteInput.addEventListener("keydown", handleNoteKeydown);
+    els.btnNote.addEventListener("click", function () {
+      setNoteOpen(els.noteField.hidden);
+    });
 
     els.entryForm.addEventListener("submit", function (e) {
       e.preventDefault();
       submitForm();
+    });
+
+    els.paymentRadios.forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        if (!radio.checked) return;
+        state.paymentMode = radio.value;
+        saveData();
+      });
+    });
+
+    els.excelPaymentFilter.addEventListener("change", function () {
+      state.excelPaymentFilter = els.excelPaymentFilter.value;
+      saveData();
     });
 
     els.multiplierEnabled.addEventListener("change", function () {
@@ -764,6 +1068,14 @@
 
     els.btnExportJournal.addEventListener("click", exportJournal);
 
+    els.btnTransferMonth.addEventListener("click", openTransferModal);
+    els.transferCancel.addEventListener("click", closeTransferModal);
+    els.transferConfirm.addEventListener("click", confirmTransfer);
+    els.transferTargetMonth.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); confirmTransfer(); }
+      else if (e.key === "Escape") { closeTransferModal(); }
+    });
+
     els.modalExportExisting.addEventListener("click", function () {
       exportCsvDownload();
     });
@@ -788,11 +1100,19 @@
     els.multiplierValue.disabled = !state.multiplier.enabled;
   }
 
+  function initPaymentControls() {
+    els.paymentRadios.forEach(function (radio) {
+      radio.checked = radio.value === state.paymentMode;
+    });
+    els.excelPaymentFilter.value = state.excelPaymentFilter;
+  }
+
   function init() {
     cacheEls();
     wireEvents();
     render();
     initMultiplierControls();
+    initPaymentControls();
     els.dayInput.focus();
     audit("app_loaded", {});
   }
